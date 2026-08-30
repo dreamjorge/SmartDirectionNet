@@ -1,0 +1,108 @@
+"""End-to-end CLI: StockStreamDB -> indicators -> features -> training -> saved model."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from smartanalyticsinvest.data_sources import load_stockstreamdb
+from smartanalyticsinvest.errors import SmartAnalyticsInvestError
+from smartanalyticsinvest.pipeline import clean_ohlcv, enrich_ohlcv
+
+from smartdirectionnet.features import build_direction_dataset, time_series_split
+from smartdirectionnet.train import save_model, train_direction_classifier
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the SmartDirectionNet training CLI argument parser."""
+
+    parser = argparse.ArgumentParser(
+        prog="smartdirectionnet-train",
+        description="Train a direction-classification model from a StockStreamDB database.",
+    )
+    parser.add_argument("db_path", help="Path to a StockStreamDB SQLite database")
+    parser.add_argument("--output", "-o", required=True, help="Path to save the trained model")
+    parser.add_argument(
+        "--ticker",
+        action="append",
+        dest="tickers",
+        help="Ticker to include (repeatable, default: all tickers in the database)",
+    )
+    parser.add_argument(
+        "--horizon", type=int, default=5, help="Prediction horizon in rows (default: 5)"
+    )
+    parser.add_argument(
+        "--test-size",
+        type=float,
+        default=0.2,
+        help="Fraction of each ticker's rows held out for testing (default: 0.2)",
+    )
+    parser.add_argument("--epochs", type=int, default=20, help="Training epochs (default: 20)")
+    parser.add_argument(
+        "--include-fundamentals",
+        action="store_true",
+        help="Join StockStreamDB fundamentals as extra feature columns",
+    )
+    parser.add_argument(
+        "--include-sentiment",
+        action="store_true",
+        help="Join StockStreamDB sentiment scores as extra feature columns",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the end-to-end training pipeline from command-line arguments."""
+
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code) if isinstance(exc.code, int) else 1
+
+    try:
+        raw = load_stockstreamdb(
+            args.db_path,
+            tickers=args.tickers,
+            include_fundamentals=args.include_fundamentals,
+            include_sentiment=args.include_sentiment,
+        )
+        cleaned = clean_ohlcv(raw)
+        enriched = enrich_ohlcv(
+            cleaned,
+            sma_windows=(10, 20),
+            rsi_windows=(14,),
+            ema_windows=(12, 26),
+            include_macd=True,
+            bollinger_windows=(20,),
+            atr_windows=(14,),
+        )
+        dataset = build_direction_dataset(enriched, horizon=args.horizon)
+        train_frame, test_frame = time_series_split(dataset, test_size=args.test_size)
+        trained, metrics = train_direction_classifier(train_frame, test_frame, epochs=args.epochs)
+    except FileNotFoundError:
+        print(f"Error: could not read database file: {args.db_path}", file=sys.stderr)
+        return 1
+    except (SmartAnalyticsInvestError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    output_path = Path(args.output)
+    try:
+        save_model(trained, output_path)
+    except OSError as exc:
+        print(f"Error: could not write model file: {output_path}: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Trained on {len(train_frame)} rows, tested on {len(test_frame)} rows")
+    print(
+        f"Train accuracy: {metrics['train_accuracy']:.3f}  "
+        f"Test accuracy: {metrics['test_accuracy']:.3f}"
+    )
+    print(f"Saved model to {output_path}")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smartdirectionnet"
+version = "0.1.0"
+description = "PyTorch direction-classification model trained on SmartAnalyticsInvest indicators."
+readme = "README.md"
+requires-python = ">=3.14"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Jorge" },
+]
+keywords = [
+    "finance",
+    "machine-learning",
+    "neural-network",
+    "ohlcv",
+    "pytorch",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "smartanalyticsinvest @ git+https://github.com/dreamjorge/SmartAnalyticsInvest",
+    "torch>=2.0.0",
+    "pandas",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "pandas-stubs",
+]
+
+[project.scripts]
+smartdirectionnet-train = "smartdirectionnet.cli:main"
+
+[project.urls]
+Repository = "https://github.com/dreamjorge/SmartDirectionNet"
+Changelog = "https://github.com/dreamjorge/SmartDirectionNet/blob/main/CHANGELOG.md"
+Issues = "https://github.com/dreamjorge/SmartDirectionNet/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.14"
+mypy_path = "src"
+strict = true
