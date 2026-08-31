@@ -108,3 +108,30 @@ def test_cli_main_trains_lstm_model_end_to_end(tmp_path, capsys):
     assert "Train accuracy" in captured.out
     reloaded = load_sequence_model(model_path)
     assert reloaded.window == 5
+
+
+def test_cli_main_trains_gbm_baseline_end_to_end(tmp_path, capsys):
+    from smartdirectionnet.baseline import load_gbm_baseline
+
+    db_path = tmp_path / "stockstream.db"
+    model_path = tmp_path / "model.json"
+    _build_stockstreamdb_fixture(db_path)
+
+    exit_code = main(
+        [
+            str(db_path),
+            "--output",
+            str(model_path),
+            "--model",
+            "gbm",
+            "--epochs",
+            "20",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert model_path.exists()
+    assert "Train accuracy" in captured.out
+    reloaded = load_gbm_baseline(model_path)
+    assert reloaded.feature_columns

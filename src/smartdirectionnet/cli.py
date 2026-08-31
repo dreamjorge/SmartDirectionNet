@@ -10,6 +10,7 @@ from smartanalyticsinvest.data_sources import load_stockstreamdb
 from smartanalyticsinvest.errors import SmartAnalyticsInvestError
 from smartanalyticsinvest.pipeline import clean_ohlcv, enrich_ohlcv
 
+from smartdirectionnet.baseline import TrainedBaseline, save_gbm_baseline, train_gbm_baseline
 from smartdirectionnet.features import (
     build_direction_dataset,
     build_sequence_dataset,
@@ -50,13 +51,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.2,
         help="Fraction of each ticker's rows held out for testing (default: 0.2)",
     )
-    parser.add_argument("--epochs", type=int, default=20, help="Training epochs (default: 20)")
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=20,
+        help="Training epochs for mlp/lstm, or boosting rounds for gbm (default: 20)",
+    )
     parser.add_argument(
         "--model",
-        choices=["mlp", "lstm"],
+        choices=["mlp", "lstm", "gbm"],
         default="mlp",
         help="Model architecture: 'mlp' trains on a single row's indicators (default); "
-        "'lstm' trains on a trailing window of rows via an LSTM",
+        "'lstm' trains on a trailing window of rows via an LSTM; "
+        "'gbm' trains a LightGBM gradient-boosted tree baseline (not a neural network, "
+        "for comparison)",
     )
     parser.add_argument(
         "--window",
@@ -86,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else 1
 
-    trained: TrainedModel | TrainedSequenceModel
+    trained: TrainedModel | TrainedSequenceModel | TrainedBaseline
     try:
         raw = load_stockstreamdb(
             args.db_path,
@@ -109,6 +117,13 @@ def main(argv: list[str] | None = None) -> int:
             train_set, test_set = sequence_time_series_split(dataset, test_size=args.test_size)
             trained, metrics = train_sequence_classifier(train_set, test_set, epochs=args.epochs)
             train_count, test_count = len(train_set.y), len(test_set.y)
+        elif args.model == "gbm":
+            frame_dataset = build_direction_dataset(enriched, horizon=args.horizon)
+            train_frame, test_frame = time_series_split(frame_dataset, test_size=args.test_size)
+            trained, metrics = train_gbm_baseline(
+                train_frame, test_frame, num_boost_round=args.epochs
+            )
+            train_count, test_count = len(train_frame), len(test_frame)
         else:
             frame_dataset = build_direction_dataset(enriched, horizon=args.horizon)
             train_frame, test_frame = time_series_split(frame_dataset, test_size=args.test_size)
@@ -127,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if isinstance(trained, TrainedSequenceModel):
             save_sequence_model(trained, output_path)
+        elif isinstance(trained, TrainedBaseline):
+            save_gbm_baseline(trained, output_path)
         else:
             save_model(trained, output_path)
     except OSError as exc:

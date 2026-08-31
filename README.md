@@ -1,13 +1,14 @@
 # SmartDirectionNet
 
-SmartDirectionNet trains a small PyTorch neural network to classify whether a stock's
-price will be higher N rows ahead ("direction classification"), using the technical
-indicators computed by [SmartAnalyticsInvest](https://github.com/dreamjorge/SmartAnalyticsInvest)
-as features and historical data collected by
-[StockStreamDB](https://github.com/dreamjorge/StockStreamDB) as its data source. Two
-architectures are available: a feed-forward MLP over a single row's indicator snapshot
-(the default), and an LSTM over a trailing window of rows that captures the sequence's
-temporal structure.
+SmartDirectionNet trains a model to classify whether a stock's price will be higher N
+rows ahead ("direction classification"), using the technical indicators computed by
+[SmartAnalyticsInvest](https://github.com/dreamjorge/SmartAnalyticsInvest) as features
+and historical data collected by [StockStreamDB](https://github.com/dreamjorge/StockStreamDB)
+as its data source. Three architectures are available: a feed-forward MLP over a single
+row's indicator snapshot (the default), an LSTM over a trailing window of rows that
+captures the sequence's temporal structure, and a LightGBM gradient-boosted-tree
+baseline — included because gradient boosting is the standard, often hard-to-beat
+baseline for tabular financial data, and is not a neural network.
 
 This is an experimental, standalone companion project — it exists specifically so that
 SmartAnalyticsInvest's core CSV analytics pipeline can stay deterministic and ML-free,
@@ -33,7 +34,7 @@ python3 -m pip install -e '.[dev]'
 ```
 
 This installs `smartanalyticsinvest` directly from its GitHub repository (it isn't
-published to PyPI), along with PyTorch, pandas, and the dev tooling.
+published to PyPI), along with PyTorch, LightGBM, pandas, and the dev tooling.
 
 ## Run tests
 
@@ -66,6 +67,13 @@ window instead of the default single-row MLP:
 
 ```bash
 smartdirectionnet-train stockstreamdb.db --output model.pt --model lstm --window 20 --epochs 20
+```
+
+Pass `--model gbm` to train the LightGBM baseline instead (here `--epochs` sets the
+number of boosting rounds):
+
+```bash
+smartdirectionnet-train stockstreamdb.db --output model.json --model gbm --epochs 100
 ```
 
 3. Or drive it from Python directly, for more control over indicators and features:
@@ -115,6 +123,16 @@ trained, metrics = train_sequence_classifier(train_set, test_set, epochs=20)
 save_sequence_model(trained, "model.pt")
 ```
 
+For the LightGBM baseline, reuse the same point-in-time dataset as the MLP:
+
+```python
+from smartdirectionnet.baseline import save_gbm_baseline, train_gbm_baseline
+
+trained, metrics = train_gbm_baseline(train_frame, test_frame, num_boost_round=100)
+print(metrics)
+save_gbm_baseline(trained, "model.json")
+```
+
 ## Design notes
 
 - **No look-ahead leakage.** `build_direction_dataset` labels row *i* using the price
@@ -133,7 +151,11 @@ save_sequence_model(trained, "model.pt")
 - **Choosing an architecture:** the MLP is simpler, faster to train, and works from very
   little data per ticker. The LSTM captures sequential structure across a trailing window
   and is a better fit once you have enough history per ticker — but is more data-hungry
-  and slower to train. Start with the MLP; move to the LSTM if it doesn't beat it.
+  and slower to train. The LightGBM baseline (`--model gbm`) is not a neural network at
+  all — gradient-boosted trees are the standard, often hard-to-beat baseline for tabular
+  financial data, and training one takes seconds. Always train it alongside the MLP/LSTM
+  as a sanity check: if a neural network can't beat it, the added complexity isn't
+  earning its keep yet.
 
 ## Disclaimer
 
