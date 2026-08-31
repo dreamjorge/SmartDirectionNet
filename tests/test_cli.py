@@ -33,6 +33,14 @@ def _build_stockstreamdb_fixture(db_path, tickers=("AAPL", "MSFT"), rows=90):
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             records,
         )
+        connection.execute(
+            "CREATE TABLE macro_indicators (macro_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "series_id TEXT, date DATE, value REAL)"
+        )
+        connection.executemany(
+            "INSERT INTO macro_indicators (series_id, date, value) VALUES (?, ?, ?)",
+            [("FEDFUNDS", "2023-12-01", 5.25), ("UNRATE", "2023-12-01", 3.7)],
+        )
 
 
 def test_cli_main_trains_and_saves_a_model_end_to_end(tmp_path, capsys):
@@ -135,3 +143,58 @@ def test_cli_main_trains_gbm_baseline_end_to_end(tmp_path, capsys):
     assert "Train accuracy" in captured.out
     reloaded = load_gbm_baseline(model_path)
     assert reloaded.feature_columns
+
+
+def test_cli_main_includes_macro_features_end_to_end(tmp_path):
+    from smartdirectionnet.baseline import load_gbm_baseline
+
+    db_path = tmp_path / "stockstream.db"
+    model_path = tmp_path / "model.json"
+    _build_stockstreamdb_fixture(db_path)
+
+    exit_code = main(
+        [
+            str(db_path),
+            "--output",
+            str(model_path),
+            "--model",
+            "gbm",
+            "--include-macro",
+            "--epochs",
+            "20",
+        ]
+    )
+
+    assert exit_code == 0
+    assert model_path.exists()
+    reloaded = load_gbm_baseline(model_path)
+    assert "macro_FEDFUNDS" in reloaded.feature_columns
+    assert "macro_UNRATE" in reloaded.feature_columns
+
+
+def test_cli_main_filters_macro_series(tmp_path):
+    from smartdirectionnet.baseline import load_gbm_baseline
+
+    db_path = tmp_path / "stockstream.db"
+    model_path = tmp_path / "model.json"
+    _build_stockstreamdb_fixture(db_path)
+
+    exit_code = main(
+        [
+            str(db_path),
+            "--output",
+            str(model_path),
+            "--model",
+            "gbm",
+            "--include-macro",
+            "--macro-series",
+            "UNRATE",
+            "--epochs",
+            "20",
+        ]
+    )
+
+    assert exit_code == 0
+    reloaded = load_gbm_baseline(model_path)
+    assert "macro_UNRATE" in reloaded.feature_columns
+    assert "macro_FEDFUNDS" not in reloaded.feature_columns

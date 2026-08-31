@@ -82,6 +82,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Join StockStreamDB sentiment scores as extra feature columns",
     )
+    parser.add_argument(
+        "--include-macro",
+        action="store_true",
+        help="Join FRED macro indicators (from StockStreamDB's macro_indicators table) "
+        "as extra feature columns",
+    )
+    parser.add_argument(
+        "--macro-series",
+        action="append",
+        dest="macro_series",
+        help="FRED series ID to include (repeatable, default: all series in the "
+        "database); only used with --include-macro",
+    )
     return parser
 
 
@@ -101,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
             tickers=args.tickers,
             include_fundamentals=args.include_fundamentals,
             include_sentiment=args.include_sentiment,
+            include_macro=args.include_macro,
+            macro_series=args.macro_series,
         )
         cleaned = clean_ohlcv(raw)
         enriched = enrich_ohlcv(

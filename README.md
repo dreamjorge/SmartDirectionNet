@@ -62,6 +62,12 @@ Add `--ticker AAPL --ticker MSFT` (repeatable) to restrict to specific tickers, 
 `--include-fundamentals`/`--include-sentiment` to also use StockStreamDB's fundamentals
 and news-sentiment tables as extra features.
 
+Add `--include-macro` to also use FRED macro-economic indicators (interest rates,
+inflation, unemployment, etc., from StockStreamDB's `macro_indicators` table) as extra
+features, broadcast to every ticker. Restrict to specific series with `--macro-series`
+(repeatable, e.g. `--macro-series FEDFUNDS --macro-series UNRATE`); omit it to include
+every series present in the database.
+
 Pass `--model lstm --window 20` to train the LSTM architecture on a trailing 20-row
 window instead of the default single-row MLP:
 

@@ -14,6 +14,9 @@ All notable changes to SmartDirectionNet will be documented in this file.
 - Added `baseline.py`: a LightGBM gradient-boosted-tree baseline (`train_gbm_baseline()`,
   `predict_gbm_baseline()`, `save_gbm_baseline()`, `load_gbm_baseline()`) for comparison
   against the neural networks, wired into the CLI as `--model gbm`.
+- Added `--include-macro`/`--macro-series` flags, using SmartAnalyticsInvest's
+  `load_stockstreamdb(include_macro=...)` to add FRED macro-economic indicators as
+  extra feature columns.
 
 ## 0.1.0 - 2026-08-30
 
