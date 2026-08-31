@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+import numpy as np
 import pandas as pd
 
 _NON_FEATURE_COLUMNS = {"date", "open", "high", "low", "close", "volume", "ticker", "label"}
@@ -74,3 +77,114 @@ def time_series_split(
     train.attrs["feature_columns"] = frame.attrs.get("feature_columns")
     test.attrs["feature_columns"] = frame.attrs.get("feature_columns")
     return train, test
+
+
+@dataclass
+class SequenceDataset:
+    """A windowed dataset ready for sequence-model training.
+
+    ``X`` has shape ``(n_samples, window, n_features)``; ``y`` has shape ``(n_samples,)``.
+    """
+
+    X: np.ndarray
+    y: np.ndarray
+    tickers: np.ndarray
+    feature_columns: list[str]
+    window: int
+
+
+def build_sequence_dataset(
+    frame: pd.DataFrame,
+    *,
+    window: int = 20,
+    horizon: int = 5,
+    feature_columns: list[str] | tuple[str, ...] | None = None,
+) -> SequenceDataset:
+    """Return a windowed labeled dataset for sequence-model direction classification.
+
+    Like ``build_direction_dataset``, but each sample is the trailing ``window`` rows of
+    features (not just the current row), suited to sequence models such as an LSTM.
+    ``frame`` must already be cleaned, indicator-enriched, and sorted by (ticker, date).
+    A window never spans two different tickers.
+    """
+
+    if not isinstance(window, int) or isinstance(window, bool) or window <= 0:
+        raise ValueError("window must be a positive integer")
+    if not isinstance(horizon, int) or isinstance(horizon, bool) or horizon <= 0:
+        raise ValueError("horizon must be a positive integer")
+
+    if feature_columns is None:
+        feature_columns = [column for column in frame.columns if column not in _NON_FEATURE_COLUMNS]
+    feature_columns = list(feature_columns)
+    if not feature_columns:
+        raise ValueError("No feature columns available to build the dataset")
+
+    has_ticker = "ticker" in frame.columns
+    groups = frame.groupby("ticker", sort=False) if has_ticker else [(None, frame)]
+
+    samples: list[np.ndarray] = []
+    labels: list[float] = []
+    sample_tickers: list[object] = []
+
+    for ticker_value, group in groups:
+        values = group[feature_columns].to_numpy(dtype="float64")
+        closes = group["close"].to_numpy(dtype="float64")
+        finite_row = np.isfinite(values).all(axis=1)
+        rows = len(group)
+        for i in range(window - 1, rows - horizon):
+            if not finite_row[i - window + 1 : i + 1].all():
+                continue
+            samples.append(values[i - window + 1 : i + 1])
+            labels.append(float(closes[i + horizon] > closes[i]))
+            sample_tickers.append(ticker_value)
+
+    if not samples:
+        raise ValueError(
+            "No samples could be built; check that window/horizon fit within each "
+            "ticker's row count and that enough feature values are non-missing"
+        )
+
+    return SequenceDataset(
+        X=np.stack(samples).astype("float32"),
+        y=np.array(labels, dtype="float32"),
+        tickers=np.array(sample_tickers, dtype=object),
+        feature_columns=feature_columns,
+        window=window,
+    )
+
+
+def sequence_time_series_split(
+    dataset: SequenceDataset, *, test_size: float = 0.2
+) -> tuple[SequenceDataset, SequenceDataset]:
+    """Return a chronological, per-ticker train/test split of a windowed dataset.
+
+    Samples are already in chronological order within each ticker (as
+    ``build_sequence_dataset`` produces them), so a positional cutoff per ticker avoids
+    look-ahead leakage.
+    """
+
+    if not 0.0 < test_size < 1.0:
+        raise ValueError("test_size must be between 0 and 1 (exclusive)")
+
+    train_indices: list[int] = []
+    test_indices: list[int] = []
+
+    for ticker_value in pd.unique(dataset.tickers):
+        positions = np.flatnonzero(dataset.tickers == ticker_value)
+        cutoff = int(len(positions) * (1 - test_size))
+        train_indices.extend(positions[:cutoff].tolist())
+        test_indices.extend(positions[cutoff:].tolist())
+
+    train_index_array = np.array(sorted(train_indices))
+    test_index_array = np.array(sorted(test_indices))
+
+    def _subset(indices: np.ndarray) -> SequenceDataset:
+        return SequenceDataset(
+            X=dataset.X[indices],
+            y=dataset.y[indices],
+            tickers=dataset.tickers[indices],
+            feature_columns=dataset.feature_columns,
+            window=dataset.window,
+        )
+
+    return _subset(train_index_array), _subset(test_index_array)
