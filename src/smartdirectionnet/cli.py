@@ -98,11 +98,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--macro-publication-lag-days",
         type=int,
-        default=30,
+        default=130,
         help="Days to shift FRED observation dates forward before joining, so a value "
         "only becomes a feature on/after its plausible real-world publication date "
-        "(default: 30; avoids look-ahead leakage from series like CPI/GDP/unemployment "
-        "whose observation date precedes their release). Only used with --include-macro",
+        "(default: 130, chosen to be safe for the slowest common series: GDP is dated "
+        "at the start of its quarter but its advance estimate isn't released until "
+        "about a month after the quarter ends, roughly 120 days later; monthly "
+        "CPI/UNRATE release much sooner, so pass a smaller value, e.g. 45, if you only "
+        "use monthly series). Only used with --include-macro",
     )
     return parser
 

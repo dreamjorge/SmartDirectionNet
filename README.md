@@ -69,11 +69,16 @@ features, broadcast to every ticker. Restrict to specific series with `--macro-s
 every series present in the database.
 
 FRED's observation date for series like CPI, GDP, or unemployment is the start of the
-reporting period, not the day it was actually published — real-world publication lag is
-commonly two to six weeks. `--macro-publication-lag-days` (default `30`) shifts each
-series' observation dates forward by that many days before joining, so training never
-sees a value before it would plausibly have been available. Lower it (e.g. to `0`) only
-for series you know are published same-day, such as most interest-rate series.
+reporting period, not the day it was actually published. `--macro-publication-lag-days`
+(default `130`) shifts each series' observation dates forward by that many days before
+joining, so training never sees a value before it would plausibly have been available.
+The default is chosen to be safe for the slowest common series: GDP is dated at the
+start of its quarter, but its advance estimate isn't released until roughly a month
+after the quarter ends — about 120 days later. Monthly series like CPI/UNRATE release
+much sooner (their real lag is 4-6 weeks), so if you're only using those, a smaller
+value such as `45` keeps more recent data available without sacrificing safety. Lower
+it (e.g. to `0`) only for series you know are published same-day, such as most
+interest-rate series.
 
 Pass `--model lstm --window 20` to train the LSTM architecture on a trailing 20-row
 window instead of the default single-row MLP:

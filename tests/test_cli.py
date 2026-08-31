@@ -39,7 +39,7 @@ def _build_stockstreamdb_fixture(db_path, tickers=("AAPL", "MSFT"), rows=90):
         )
         connection.executemany(
             "INSERT INTO macro_indicators (series_id, date, value) VALUES (?, ?, ?)",
-            [("FEDFUNDS", "2023-12-01", 5.25), ("UNRATE", "2023-12-01", 3.7)],
+            [("FEDFUNDS", "2023-01-01", 5.25), ("UNRATE", "2023-01-01", 3.7)],
         )
 
 
@@ -143,6 +143,17 @@ def test_cli_main_trains_gbm_baseline_end_to_end(tmp_path, capsys):
     assert "Train accuracy" in captured.out
     reloaded = load_gbm_baseline(model_path)
     assert reloaded.feature_columns
+
+
+def test_macro_publication_lag_days_defaults_to_a_gdp_safe_value():
+    from smartdirectionnet.cli import build_parser
+
+    args = build_parser().parse_args(["db.sqlite", "--output", "model.pt"])
+
+    # GDP is dated at the start of its quarter but its advance estimate isn't released
+    # until roughly a month after the quarter ends (~120 days later); the default must
+    # cover that with some margin, not just the much shorter CPI/UNRATE lag.
+    assert args.macro_publication_lag_days >= 120
 
 
 def test_cli_main_includes_macro_features_end_to_end(tmp_path):

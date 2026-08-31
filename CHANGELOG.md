@@ -39,6 +39,16 @@ All notable changes to SmartDirectionNet will be documented in this file.
   `--macro-publication-lag-days` (default `30`), threaded through to
   SmartAnalyticsInvest's `load_stockstreamdb(macro_publication_lag_days=...)`, to shift
   observation dates forward by a conservative lag before joining.
+- **Fixed** (found via automated code review): the `--macro-publication-lag-days`
+  default of `30` was itself not leakage-safe for slower-to-publish series such as
+  GDP, whose advance estimate isn't released until roughly 120 days after its
+  quarter-start observation date. Raised the default to `130`; documented a smaller
+  value (e.g. `45`) as appropriate for callers using only faster monthly series.
+- **Fixed a timezone bug** (found via automated code review): `build_direction_dataset()`
+  assigned `_label_date` via `.values`, which silently drops timezone info from a
+  timezone-aware `date` column. `time_series_split()` then raised `TypeError` comparing
+  the resulting timezone-naive `_label_date` against a timezone-aware test-start date,
+  breaking the leakage-purge fix entirely for timezone-aware market data.
 
 ## 0.1.0 - 2026-08-30
 
