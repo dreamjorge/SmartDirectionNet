@@ -102,10 +102,29 @@ def test_time_series_split_rejects_invalid_test_size():
         time_series_split(frame, test_size=1.0)
 
 
+def test_time_series_split_purges_training_rows_whose_label_reaches_into_test_period():
+    frame = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=20, freq="D"),
+            "close": range(100, 120),
+            "sma_2": range(20),
+        }
+    )
+    dataset = build_direction_dataset(frame, horizon=3, feature_columns=["sma_2"])
+    naive_cutoff = int(len(dataset) * 0.8)
+
+    train, test = time_series_split(dataset, test_size=0.2)
+
+    assert (train["_label_date"] < test["date"].min()).all()
+    # The naive positional cutoff would have kept label-leaking rows; purging removes them.
+    assert len(train) < naive_cutoff
+
+
 def _sequence_frame(feature=None):
     close = [10, 11, 12, 13, 9, 20]
     return pd.DataFrame(
         {
+            "date": pd.date_range("2024-01-01", periods=6, freq="D"),
             "close": close,
             "sma_2": feature if feature is not None else [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         }
@@ -144,6 +163,7 @@ def test_build_sequence_dataset_windows_never_cross_ticker_boundaries():
 
     frame = pd.DataFrame(
         {
+            "date": list(pd.date_range("2024-01-01", periods=4, freq="D")) * 2,
             "close": [10, 11, 12, 13, 100, 101, 102, 103],
             "sma_2": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
             "ticker": ["A", "A", "A", "A", "B", "B", "B", "B"],
@@ -183,6 +203,7 @@ def test_sequence_time_series_split_has_no_leakage_per_ticker():
     rows = 12
     frame = pd.DataFrame(
         {
+            "date": list(pd.date_range("2024-01-01", periods=rows, freq="D")) * 2,
             "close": list(range(rows)) + list(range(100, 100 + rows)),
             "sma_2": list(range(rows)) + list(range(100, 100 + rows)),
             "ticker": ["A"] * rows + ["B"] * rows,
@@ -192,7 +213,10 @@ def test_sequence_time_series_split_has_no_leakage_per_ticker():
 
     train, test = sequence_time_series_split(dataset, test_size=0.25)
 
-    assert len(train.y) + len(test.y) == len(dataset.y)
+    # Some boundary samples may be purged (see the leakage-purge test below), so the
+    # split no longer necessarily accounts for every sample, only a subset of it.
+    assert len(train.y) + len(test.y) <= len(dataset.y)
+    assert len(test.y) > 0
     for ticker in ("A", "B"):
         train_last_values = train.X[train.tickers == ticker][:, -1, 0]
         test_last_values = test.X[test.tickers == ticker][:, -1, 0]
@@ -208,3 +232,54 @@ def test_sequence_time_series_split_rejects_invalid_test_size():
 
     with pytest.raises(ValueError, match="test_size"):
         sequence_time_series_split(dataset, test_size=0.0)
+
+
+def test_sequence_time_series_split_purges_samples_whose_label_reaches_into_test_period():
+    from smartdirectionnet.features import build_sequence_dataset, sequence_time_series_split
+
+    frame = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=30, freq="D"),
+            "close": range(100, 130),
+            "sma_2": range(30),
+        }
+    )
+    dataset = build_sequence_dataset(frame, window=3, horizon=3, feature_columns=["sma_2"])
+    naive_cutoff = int(len(dataset.y) * 0.8)
+
+    train, test = sequence_time_series_split(dataset, test_size=0.2)
+
+    assert (train.label_dates < test.anchor_dates.min()).all()
+    assert len(train.y) < naive_cutoff
+
+
+def test_sequence_dataset_tracks_anchor_and_label_dates():
+    from smartdirectionnet.features import build_sequence_dataset
+
+    dataset = build_sequence_dataset(
+        _sequence_frame(), window=3, horizon=1, feature_columns=["sma_2"]
+    )
+
+    expected_anchor_dates = pd.date_range("2024-01-01", periods=6, freq="D")[2:5]
+    expected_label_dates = pd.date_range("2024-01-01", periods=6, freq="D")[3:6]
+    assert list(dataset.anchor_dates) == list(expected_anchor_dates)
+    assert list(dataset.label_dates) == list(expected_label_dates)
+
+
+def test_sequence_time_series_split_handles_empty_train_split_without_error():
+    from smartdirectionnet.features import build_sequence_dataset, sequence_time_series_split
+
+    frame = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=4, freq="D"),
+            "close": [10, 11, 12, 13],
+            "sma_2": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+    dataset = build_sequence_dataset(frame, window=2, horizon=1, feature_columns=["sma_2"])
+
+    train, test = sequence_time_series_split(dataset, test_size=0.9)
+
+    assert len(train.y) == 0
+    assert train.X.shape == (0, 2, 1)
+    assert len(test.y) > 0

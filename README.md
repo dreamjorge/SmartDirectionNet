@@ -144,7 +144,11 @@ save_gbm_baseline(trained, "model.json")
 - **No look-ahead leakage.** `build_direction_dataset` labels row *i* using the price
   `horizon` rows ahead of it, and drops rows with no future row to label. `time_series_split`
   splits chronologically (never shuffled) and independently per ticker, so every training
-  row predates every test row for that ticker.
+  row predates every test row for that ticker — and it additionally purges any training
+  row whose *label* was computed from a date at or after the first test row's date (the
+  last `horizon`-ish rows before a naive cutoff), since otherwise the tail of the training
+  set would be labeled using the same future prices the test set evaluates on.
+  `sequence_time_series_split` applies the same purge to windowed samples.
 - **Ticker boundaries are respected.** Labeling never uses another ticker's future rows,
   matching the per-ticker grouping guarantees already provided by SmartAnalyticsInvest's
   pipeline.

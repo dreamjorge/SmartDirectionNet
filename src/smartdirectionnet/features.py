@@ -7,7 +7,17 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-_NON_FEATURE_COLUMNS = {"date", "open", "high", "low", "close", "volume", "ticker", "label"}
+_NON_FEATURE_COLUMNS = {
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "ticker",
+    "label",
+    "_label_date",
+}
 
 
 def build_direction_dataset(
@@ -25,6 +35,10 @@ def build_direction_dataset(
     Rows with no future row to label (the last ``horizon`` rows of each ticker) and rows
     with any missing feature value (e.g. an indicator's rolling-window warm-up period) are
     dropped. Labels never use another ticker's future rows.
+
+    The result carries a ``_label_date`` column (the future row's date used to compute
+    each label), excluded from ``feature_columns``, which ``time_series_split`` uses to
+    purge training rows whose label reaches into the test period.
     """
 
     if not isinstance(horizon, int) or isinstance(horizon, bool) or horizon <= 0:
@@ -32,6 +46,7 @@ def build_direction_dataset(
 
     group_keys = frame["ticker"] if "ticker" in frame.columns else pd.Series(0, index=frame.index)
     future_close = frame.groupby(group_keys, sort=False)["close"].shift(-horizon)
+    future_date = frame.groupby(group_keys, sort=False)["date"].shift(-horizon)
 
     if feature_columns is None:
         feature_columns = [column for column in frame.columns if column not in _NON_FEATURE_COLUMNS]
@@ -43,9 +58,19 @@ def build_direction_dataset(
 
     result = frame.loc[valid_mask].copy()
     result["label"] = (future_close.loc[valid_mask] > frame.loc[valid_mask, "close"]).astype(int)
+    result["_label_date"] = future_date.loc[valid_mask].values
     result = result.reset_index(drop=True)
     result.attrs["feature_columns"] = feature_columns
     return result
+
+
+def _purge_train_candidates(
+    train_candidates: pd.DataFrame, test_start_date: object
+) -> pd.DataFrame:
+    if "_label_date" not in train_candidates.columns:
+        return train_candidates
+    safe_mask = train_candidates["_label_date"] < test_start_date
+    return train_candidates[safe_mask]
 
 
 def time_series_split(
@@ -54,7 +79,10 @@ def time_series_split(
     """Return a chronological (non-shuffled) train/test split, per ticker when present.
 
     Unlike a random split, this guarantees every training row predates every test row
-    for the same ticker, avoiding look-ahead leakage from the future into training data.
+    for the same ticker. If ``frame`` has a ``_label_date`` column (as produced by
+    ``build_direction_dataset``), training rows whose label was computed from a date at
+    or after the first test row's date are also purged — otherwise, a training label
+    could be derived from the same future prices the test set is meant to evaluate on.
     """
 
     if not 0.0 < test_size < 1.0:
@@ -62,14 +90,22 @@ def time_series_split(
 
     if "ticker" not in frame.columns:
         cutoff = int(len(frame) * (1 - test_size))
-        train = frame.iloc[:cutoff].reset_index(drop=True)
+        train_candidates = frame.iloc[:cutoff]
         test = frame.iloc[cutoff:].reset_index(drop=True)
+        if cutoff < len(frame):
+            train_candidates = _purge_train_candidates(train_candidates, frame.iloc[cutoff]["date"])
+        train = train_candidates.reset_index(drop=True)
     else:
         train_parts = []
         test_parts = []
         for _, group in frame.groupby("ticker", sort=False):
             cutoff = int(len(group) * (1 - test_size))
-            train_parts.append(group.iloc[:cutoff])
+            train_candidates = group.iloc[:cutoff]
+            if cutoff < len(group):
+                train_candidates = _purge_train_candidates(
+                    train_candidates, group.iloc[cutoff]["date"]
+                )
+            train_parts.append(train_candidates)
             test_parts.append(group.iloc[cutoff:])
         train = pd.concat(train_parts, ignore_index=True)
         test = pd.concat(test_parts, ignore_index=True)
@@ -84,6 +120,9 @@ class SequenceDataset:
     """A windowed dataset ready for sequence-model training.
 
     ``X`` has shape ``(n_samples, window, n_features)``; ``y`` has shape ``(n_samples,)``.
+    ``anchor_dates`` is each sample's own (most recent) row date; ``label_dates`` is the
+    future date used to compute its label. Both are used by ``sequence_time_series_split``
+    to purge training samples whose label reaches into the test period.
     """
 
     X: np.ndarray
@@ -91,6 +130,8 @@ class SequenceDataset:
     tickers: np.ndarray
     feature_columns: list[str]
     window: int
+    anchor_dates: np.ndarray
+    label_dates: np.ndarray
 
 
 def build_sequence_dataset(
@@ -125,10 +166,13 @@ def build_sequence_dataset(
     samples: list[np.ndarray] = []
     labels: list[float] = []
     sample_tickers: list[object] = []
+    anchor_dates: list[object] = []
+    label_dates: list[object] = []
 
     for ticker_value, group in groups:
         values = group[feature_columns].to_numpy(dtype="float64")
         closes = group["close"].to_numpy(dtype="float64")
+        dates = group["date"].to_numpy()
         finite_row = np.isfinite(values).all(axis=1)
         rows = len(group)
         for i in range(window - 1, rows - horizon):
@@ -137,6 +181,8 @@ def build_sequence_dataset(
             samples.append(values[i - window + 1 : i + 1])
             labels.append(float(closes[i + horizon] > closes[i]))
             sample_tickers.append(ticker_value)
+            anchor_dates.append(dates[i])
+            label_dates.append(dates[i + horizon])
 
     if not samples:
         raise ValueError(
@@ -150,6 +196,8 @@ def build_sequence_dataset(
         tickers=np.array(sample_tickers, dtype=object),
         feature_columns=feature_columns,
         window=window,
+        anchor_dates=np.array(anchor_dates),
+        label_dates=np.array(label_dates),
     )
 
 
@@ -159,8 +207,10 @@ def sequence_time_series_split(
     """Return a chronological, per-ticker train/test split of a windowed dataset.
 
     Samples are already in chronological order within each ticker (as
-    ``build_sequence_dataset`` produces them), so a positional cutoff per ticker avoids
-    look-ahead leakage.
+    ``build_sequence_dataset`` produces them), so a positional cutoff per ticker is used.
+    Training samples whose ``label_date`` falls at or after the first test sample's
+    ``anchor_date`` are additionally purged — otherwise the tail of the training set
+    would be labeled using the same future prices the test set evaluates on.
     """
 
     if not 0.0 < test_size < 1.0:
@@ -172,11 +222,16 @@ def sequence_time_series_split(
     for ticker_value in pd.unique(dataset.tickers):
         positions = np.flatnonzero(dataset.tickers == ticker_value)
         cutoff = int(len(positions) * (1 - test_size))
-        train_indices.extend(positions[:cutoff].tolist())
+        train_candidates = positions[:cutoff]
+        if cutoff < len(positions):
+            test_start_date = dataset.anchor_dates[positions[cutoff]]
+            safe_mask = dataset.label_dates[train_candidates] < test_start_date
+            train_candidates = train_candidates[safe_mask]
+        train_indices.extend(train_candidates.tolist())
         test_indices.extend(positions[cutoff:].tolist())
 
-    train_index_array = np.array(sorted(train_indices))
-    test_index_array = np.array(sorted(test_indices))
+    train_index_array = np.array(sorted(train_indices), dtype=int)
+    test_index_array = np.array(sorted(test_indices), dtype=int)
 
     def _subset(indices: np.ndarray) -> SequenceDataset:
         return SequenceDataset(
@@ -185,6 +240,8 @@ def sequence_time_series_split(
             tickers=dataset.tickers[indices],
             feature_columns=dataset.feature_columns,
             window=dataset.window,
+            anchor_dates=dataset.anchor_dates[indices],
+            label_dates=dataset.label_dates[indices],
         )
 
     return _subset(train_index_array), _subset(test_index_array)
