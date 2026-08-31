@@ -50,8 +50,10 @@ the test itself, and model training uses a fixed random seed.
 
 ## End-to-end usage
 
-1. Populate a StockStreamDB SQLite database (see that project's README for how to fetch
-   OHLCV, fundamentals, and sentiment data for your tickers).
+1. Populate a StockStreamDB SQLite database by running its `fetch <ticker> <period>`
+   command for each ticker (see that project's README). Fundamentals and sentiment data
+   collection aren't implemented upstream yet (dreamjorge/StockStreamDB#7, #8, #19, #27)
+   — `--include-fundamentals`/`--include-sentiment` won't find any data until they land.
 2. Train and save a model:
 
 ```bash
