@@ -18,11 +18,12 @@ while this repository handles the optional, heavier (PyTorch-based) training wor
 
 ```
 StockStreamDB            SmartAnalyticsInvest              SmartDirectionNet
-(collects OHLCV,     ->  (cleans OHLCV, computes      ->  (builds a labeled dataset,
- fundamentals, and       SMA/RSI/MACD/Bollinger/ATR        trains + saves a PyTorch
- news sentiment into     indicators; reads a               direction-classification
- a local SQLite file)    StockStreamDB database             model)
-                         via load_stockstreamdb())
+(collects OHLCV       -> (cleans OHLCV, computes      ->  (builds a labeled dataset,
+ into a local SQLite      SMA/RSI/MACD/Bollinger/ATR        trains + saves a PyTorch
+ file; fundamentals/      indicators; reads a               direction-classification
+ sentiment collection     StockStreamDB database             model)
+ are planned, not yet     via load_stockstreamdb())
+ implemented)
 ```
 
 ## Setup
