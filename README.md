@@ -68,6 +68,13 @@ features, broadcast to every ticker. Restrict to specific series with `--macro-s
 (repeatable, e.g. `--macro-series FEDFUNDS --macro-series UNRATE`); omit it to include
 every series present in the database.
 
+FRED's observation date for series like CPI, GDP, or unemployment is the start of the
+reporting period, not the day it was actually published — real-world publication lag is
+commonly two to six weeks. `--macro-publication-lag-days` (default `30`) shifts each
+series' observation dates forward by that many days before joining, so training never
+sees a value before it would plausibly have been available. Lower it (e.g. to `0`) only
+for series you know are published same-day, such as most interest-rate series.
+
 Pass `--model lstm --window 20` to train the LSTM architecture on a trailing 20-row
 window instead of the default single-row MLP:
 

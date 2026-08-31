@@ -95,6 +95,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="FRED series ID to include (repeatable, default: all series in the "
         "database); only used with --include-macro",
     )
+    parser.add_argument(
+        "--macro-publication-lag-days",
+        type=int,
+        default=30,
+        help="Days to shift FRED observation dates forward before joining, so a value "
+        "only becomes a feature on/after its plausible real-world publication date "
+        "(default: 30; avoids look-ahead leakage from series like CPI/GDP/unemployment "
+        "whose observation date precedes their release). Only used with --include-macro",
+    )
     return parser
 
 
@@ -116,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
             include_sentiment=args.include_sentiment,
             include_macro=args.include_macro,
             macro_series=args.macro_series,
+            macro_publication_lag_days=args.macro_publication_lag_days,
         )
         cleaned = clean_ohlcv(raw)
         enriched = enrich_ohlcv(

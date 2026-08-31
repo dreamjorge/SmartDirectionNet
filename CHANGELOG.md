@@ -32,6 +32,13 @@ All notable changes to SmartDirectionNet will be documented in this file.
   the intended `ValueError` from `train_sequence_classifier`) when every ticker's
   training split was empty, by giving the empty-case index arrays an explicit integer
   dtype.
+- **Fixed a look-ahead leakage bug** (found via automated code review): FRED's
+  observation date for series like CPI, GDP, and unemployment is the start of the
+  reporting period, not the day it was actually published (releases commonly lag two to
+  six weeks), so `--include-macro` could leak future information into training. Added
+  `--macro-publication-lag-days` (default `30`), threaded through to
+  SmartAnalyticsInvest's `load_stockstreamdb(macro_publication_lag_days=...)`, to shift
+  observation dates forward by a conservative lag before joining.
 
 ## 0.1.0 - 2026-08-30
 

@@ -172,6 +172,34 @@ def test_cli_main_includes_macro_features_end_to_end(tmp_path):
     assert "macro_UNRATE" in reloaded.feature_columns
 
 
+def test_cli_main_threads_macro_publication_lag_through(tmp_path):
+    from smartdirectionnet.baseline import load_gbm_baseline
+
+    db_path = tmp_path / "stockstream.db"
+    model_path = tmp_path / "model.json"
+    _build_stockstreamdb_fixture(db_path)
+
+    exit_code = main(
+        [
+            str(db_path),
+            "--output",
+            str(model_path),
+            "--model",
+            "gbm",
+            "--include-macro",
+            "--macro-publication-lag-days",
+            "40",
+            "--epochs",
+            "20",
+        ]
+    )
+
+    assert exit_code == 0
+    reloaded = load_gbm_baseline(model_path)
+    assert "macro_FEDFUNDS" in reloaded.feature_columns
+    assert "macro_UNRATE" in reloaded.feature_columns
+
+
 def test_cli_main_filters_macro_series(tmp_path):
     from smartdirectionnet.baseline import load_gbm_baseline
 
