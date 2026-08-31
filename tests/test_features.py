@@ -120,6 +120,21 @@ def test_time_series_split_purges_training_rows_whose_label_reaches_into_test_pe
     assert len(train) < naive_cutoff
 
 
+def test_time_series_split_purges_training_rows_with_timezone_aware_dates():
+    frame = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=20, freq="D", tz="UTC"),
+            "close": range(100, 120),
+            "sma_2": range(20),
+        }
+    )
+    dataset = build_direction_dataset(frame, horizon=3, feature_columns=["sma_2"])
+
+    train, test = time_series_split(dataset, test_size=0.2)
+
+    assert (train["_label_date"] < test["date"].min()).all()
+
+
 def _sequence_frame(feature=None):
     close = [10, 11, 12, 13, 9, 20]
     return pd.DataFrame(

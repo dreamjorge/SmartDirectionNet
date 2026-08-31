@@ -58,7 +58,7 @@ def build_direction_dataset(
 
     result = frame.loc[valid_mask].copy()
     result["label"] = (future_close.loc[valid_mask] > frame.loc[valid_mask, "close"]).astype(int)
-    result["_label_date"] = future_date.loc[valid_mask].values
+    result["_label_date"] = future_date.loc[valid_mask]
     result = result.reset_index(drop=True)
     result.attrs["feature_columns"] = feature_columns
     return result
