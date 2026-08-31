@@ -221,10 +221,25 @@ def train_sequence_classifier(
 
 
 def predict_sequence(trained: TrainedSequenceModel, dataset: SequenceDataset) -> np.ndarray:
-    """Return the predicted probability of a price rise for each sample in ``dataset``."""
+    """Return the predicted probability of a price rise for each sample in ``dataset``.
+
+    ``dataset``'s features are reordered to match ``trained.feature_columns`` if they
+    differ in order; a mismatched feature *set* raises ``ValueError`` rather than
+    silently feeding misaligned values into the model.
+    """
 
     trained.model.eval()
-    x = _normalize_sequence(dataset.X, trained.feature_mean, trained.feature_std)
+    if dataset.feature_columns == trained.feature_columns:
+        x_values = dataset.X
+    else:
+        if set(dataset.feature_columns) != set(trained.feature_columns):
+            raise ValueError(
+                "dataset.feature_columns do not match the trained model's feature_columns: "
+                f"{dataset.feature_columns!r} vs {trained.feature_columns!r}"
+            )
+        order = [dataset.feature_columns.index(column) for column in trained.feature_columns]
+        x_values = dataset.X[:, :, order]
+    x = _normalize_sequence(x_values, trained.feature_mean, trained.feature_std)
     with torch.no_grad():
         probabilities = torch.sigmoid(trained.model(x))
     return probabilities.numpy()

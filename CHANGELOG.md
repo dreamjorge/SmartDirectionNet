@@ -17,6 +17,21 @@ All notable changes to SmartDirectionNet will be documented in this file.
 - Added `--include-macro`/`--macro-series` flags, using SmartAnalyticsInvest's
   `load_stockstreamdb(include_macro=...)` to add FRED macro-economic indicators as
   extra feature columns.
+- **Fixed a label-leakage bug** (found via automated code review) in both
+  `time_series_split()` and `sequence_time_series_split()`: the naive positional cutoff
+  could leave training rows/samples whose *label* was computed from a price at or after
+  the first test row's date, letting the model train on the same future prices the test
+  set was meant to evaluate on. Both functions now purge those boundary rows/samples.
+  `build_direction_dataset()` now carries a `_label_date` column (excluded from
+  features) and `SequenceDataset` gained `anchor_dates`/`label_dates` fields to support
+  this.
+- **Fixed** `predict_sequence()` silently mis-predicting if a `SequenceDataset`'s
+  `feature_columns` order didn't match the trained model's; it now reorders matching
+  feature sets and raises `ValueError` for a genuinely different feature set.
+- **Fixed** `sequence_time_series_split()` raising an uncaught `IndexError` (instead of
+  the intended `ValueError` from `train_sequence_classifier`) when every ticker's
+  training split was empty, by giving the empty-case index arrays an explicit integer
+  dtype.
 
 ## 0.1.0 - 2026-08-30
 

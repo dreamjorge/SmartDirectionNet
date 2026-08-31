@@ -71,7 +71,16 @@ def _separable_sequence_dataset(n_sequences, window, seed):
     x = rng.normal(size=(n_sequences, window, 1)).astype("float32")
     y = (x.mean(axis=1)[:, 0] > 0).astype("float32")
     tickers = np.array(["A"] * n_sequences, dtype=object)
-    return SequenceDataset(X=x, y=y, tickers=tickers, feature_columns=["feature"], window=window)
+    dates = pd.to_datetime("2024-01-01") + pd.to_timedelta(np.arange(n_sequences), unit="D")
+    return SequenceDataset(
+        X=x,
+        y=y,
+        tickers=tickers,
+        feature_columns=["feature"],
+        window=window,
+        anchor_dates=dates.to_numpy(),
+        label_dates=(dates + pd.Timedelta(days=1)).to_numpy(),
+    )
 
 
 def test_train_sequence_classifier_learns_a_separable_pattern():
@@ -98,6 +107,8 @@ def test_train_sequence_classifier_rejects_empty_datasets():
         tickers=np.empty((0,), dtype=object),
         feature_columns=["feature"],
         window=3,
+        anchor_dates=np.empty((0,)),
+        label_dates=np.empty((0,)),
     )
     non_empty = _separable_sequence_dataset(10, window=3, seed=0)
 
@@ -128,3 +139,65 @@ def test_save_and_load_sequence_model_round_trips_identical_predictions(tmp_path
     assert reloaded.feature_columns == trained.feature_columns
     assert reloaded.window == trained.window
     assert np.allclose(before, after)
+
+
+def test_predict_sequence_reorders_mismatched_feature_column_order():
+    from smartdirectionnet.features import SequenceDataset
+    from smartdirectionnet.train import predict_sequence, train_sequence_classifier
+
+    rng = np.random.default_rng(0)
+    n = 50
+    feature_a = rng.normal(size=(n, 4, 1)).astype("float32")
+    feature_b = rng.normal(size=(n, 4, 1)).astype("float32")
+    x_train = np.concatenate([feature_a, feature_b], axis=2)
+    y_train = (feature_a.mean(axis=1)[:, 0] > 0).astype("float32")
+    dates = pd.date_range("2024-01-01", periods=n, freq="D")
+    train_dataset = SequenceDataset(
+        X=x_train,
+        y=y_train,
+        tickers=np.array(["A"] * n, dtype=object),
+        feature_columns=["a", "b"],
+        window=4,
+        anchor_dates=dates.to_numpy(),
+        label_dates=(dates + pd.Timedelta(days=1)).to_numpy(),
+    )
+    trained, _ = train_sequence_classifier(
+        train_dataset, train_dataset, hidden_size=8, epochs=5, seed=0
+    )
+
+    swapped_dataset = SequenceDataset(
+        X=x_train[:, :, [1, 0]],
+        y=y_train,
+        tickers=train_dataset.tickers,
+        feature_columns=["b", "a"],
+        window=4,
+        anchor_dates=train_dataset.anchor_dates,
+        label_dates=train_dataset.label_dates,
+    )
+
+    same_order_predictions = predict_sequence(trained, train_dataset)
+    reordered_predictions = predict_sequence(trained, swapped_dataset)
+
+    assert np.allclose(same_order_predictions, reordered_predictions)
+
+
+def test_predict_sequence_rejects_mismatched_feature_set():
+    from smartdirectionnet.features import SequenceDataset
+    from smartdirectionnet.train import predict_sequence, train_sequence_classifier
+
+    train_dataset = _separable_sequence_dataset(20, window=3, seed=0)
+    trained, _ = train_sequence_classifier(
+        train_dataset, train_dataset, hidden_size=4, epochs=5, seed=0
+    )
+    wrong_dataset = SequenceDataset(
+        X=train_dataset.X,
+        y=train_dataset.y,
+        tickers=train_dataset.tickers,
+        feature_columns=["different_feature"],
+        window=train_dataset.window,
+        anchor_dates=train_dataset.anchor_dates,
+        label_dates=train_dataset.label_dates,
+    )
+
+    with pytest.raises(ValueError, match="feature_columns"):
+        predict_sequence(trained, wrong_dataset)
