@@ -2,6 +2,16 @@
 
 All notable changes to SmartDirectionNet will be documented in this file.
 
+## Unreleased
+
+- Added `features.build_sequence_dataset()` and `features.sequence_time_series_split()`
+  for windowed (trailing-N-row) supervised dataset construction, respecting ticker
+  boundaries and avoiding look-ahead leakage the same way the point-in-time dataset does.
+- Added `model.DirectionSequenceClassifier`, a small LSTM alternative to the MLP.
+- Added `train.train_sequence_classifier()`, `predict_sequence()`,
+  `save_sequence_model()`, and `load_sequence_model()`.
+- Added `--model {mlp,lstm}` and `--window` flags to `smartdirectionnet-train`.
+
 ## 0.1.0 - 2026-08-30
 
 Initial release.

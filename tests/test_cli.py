@@ -79,3 +79,32 @@ def test_cli_main_filters_by_ticker(tmp_path, capsys):
 
     assert exit_code == 0
     assert model_path.exists()
+
+
+def test_cli_main_trains_lstm_model_end_to_end(tmp_path, capsys):
+    from smartdirectionnet.train import load_sequence_model
+
+    db_path = tmp_path / "stockstream.db"
+    model_path = tmp_path / "model.pt"
+    _build_stockstreamdb_fixture(db_path)
+
+    exit_code = main(
+        [
+            str(db_path),
+            "--output",
+            str(model_path),
+            "--model",
+            "lstm",
+            "--window",
+            "5",
+            "--epochs",
+            "5",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert model_path.exists()
+    assert "Train accuracy" in captured.out
+    reloaded = load_sequence_model(model_path)
+    assert reloaded.window == 5

@@ -1,10 +1,13 @@
 # SmartDirectionNet
 
-SmartDirectionNet trains a small PyTorch feed-forward neural network to classify whether a
-stock's price will be higher N rows ahead ("direction classification"), using the
-technical indicators computed by [SmartAnalyticsInvest](https://github.com/dreamjorge/SmartAnalyticsInvest)
+SmartDirectionNet trains a small PyTorch neural network to classify whether a stock's
+price will be higher N rows ahead ("direction classification"), using the technical
+indicators computed by [SmartAnalyticsInvest](https://github.com/dreamjorge/SmartAnalyticsInvest)
 as features and historical data collected by
-[StockStreamDB](https://github.com/dreamjorge/StockStreamDB) as its data source.
+[StockStreamDB](https://github.com/dreamjorge/StockStreamDB) as its data source. Two
+architectures are available: a feed-forward MLP over a single row's indicator snapshot
+(the default), and an LSTM over a trailing window of rows that captures the sequence's
+temporal structure.
 
 This is an experimental, standalone companion project — it exists specifically so that
 SmartAnalyticsInvest's core CSV analytics pipeline can stay deterministic and ML-free,
@@ -58,6 +61,13 @@ Add `--ticker AAPL --ticker MSFT` (repeatable) to restrict to specific tickers, 
 `--include-fundamentals`/`--include-sentiment` to also use StockStreamDB's fundamentals
 and news-sentiment tables as extra features.
 
+Pass `--model lstm --window 20` to train the LSTM architecture on a trailing 20-row
+window instead of the default single-row MLP:
+
+```bash
+smartdirectionnet-train stockstreamdb.db --output model.pt --model lstm --window 20 --epochs 20
+```
+
 3. Or drive it from Python directly, for more control over indicators and features:
 
 ```python
@@ -88,6 +98,23 @@ print(metrics)  # {"train_accuracy": ..., "test_accuracy": ...}
 save_model(trained, "model.pt")
 ```
 
+For the LSTM architecture, use the windowed equivalents instead:
+
+```python
+from smartdirectionnet.features import build_sequence_dataset, sequence_time_series_split
+from smartdirectionnet.train import (
+    predict_sequence,
+    save_sequence_model,
+    train_sequence_classifier,
+)
+
+dataset = build_sequence_dataset(enriched, window=20, horizon=5)
+train_set, test_set = sequence_time_series_split(dataset, test_size=0.2)
+
+trained, metrics = train_sequence_classifier(train_set, test_set, epochs=20)
+save_sequence_model(trained, "model.pt")
+```
+
 ## Design notes
 
 - **No look-ahead leakage.** `build_direction_dataset` labels row *i* using the price
@@ -103,6 +130,10 @@ save_model(trained, "model.pt")
 - Direction classification, not price prediction: the label is binary (up/down), not a
   regression target. This is deliberately simpler to validate correctly than predicting
   an exact future price.
+- **Choosing an architecture:** the MLP is simpler, faster to train, and works from very
+  little data per ticker. The LSTM captures sequential structure across a trailing window
+  and is a better fit once you have enough history per ticker — but is more data-hungry
+  and slower to train. Start with the MLP; move to the LSTM if it doesn't beat it.
 
 ## Disclaimer
 

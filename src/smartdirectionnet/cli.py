@@ -10,8 +10,20 @@ from smartanalyticsinvest.data_sources import load_stockstreamdb
 from smartanalyticsinvest.errors import SmartAnalyticsInvestError
 from smartanalyticsinvest.pipeline import clean_ohlcv, enrich_ohlcv
 
-from smartdirectionnet.features import build_direction_dataset, time_series_split
-from smartdirectionnet.train import save_model, train_direction_classifier
+from smartdirectionnet.features import (
+    build_direction_dataset,
+    build_sequence_dataset,
+    sequence_time_series_split,
+    time_series_split,
+)
+from smartdirectionnet.train import (
+    TrainedModel,
+    TrainedSequenceModel,
+    save_model,
+    save_sequence_model,
+    train_direction_classifier,
+    train_sequence_classifier,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +52,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--epochs", type=int, default=20, help="Training epochs (default: 20)")
     parser.add_argument(
+        "--model",
+        choices=["mlp", "lstm"],
+        default="mlp",
+        help="Model architecture: 'mlp' trains on a single row's indicators (default); "
+        "'lstm' trains on a trailing window of rows via an LSTM",
+    )
+    parser.add_argument(
+        "--window",
+        type=int,
+        default=20,
+        help="Trailing window length in rows, used only when --model lstm (default: 20)",
+    )
+    parser.add_argument(
         "--include-fundamentals",
         action="store_true",
         help="Join StockStreamDB fundamentals as extra feature columns",
@@ -61,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else 1
 
+    trained: TrainedModel | TrainedSequenceModel
     try:
         raw = load_stockstreamdb(
             args.db_path,
@@ -78,9 +104,18 @@ def main(argv: list[str] | None = None) -> int:
             bollinger_windows=(20,),
             atr_windows=(14,),
         )
-        dataset = build_direction_dataset(enriched, horizon=args.horizon)
-        train_frame, test_frame = time_series_split(dataset, test_size=args.test_size)
-        trained, metrics = train_direction_classifier(train_frame, test_frame, epochs=args.epochs)
+        if args.model == "lstm":
+            dataset = build_sequence_dataset(enriched, window=args.window, horizon=args.horizon)
+            train_set, test_set = sequence_time_series_split(dataset, test_size=args.test_size)
+            trained, metrics = train_sequence_classifier(train_set, test_set, epochs=args.epochs)
+            train_count, test_count = len(train_set.y), len(test_set.y)
+        else:
+            frame_dataset = build_direction_dataset(enriched, horizon=args.horizon)
+            train_frame, test_frame = time_series_split(frame_dataset, test_size=args.test_size)
+            trained, metrics = train_direction_classifier(
+                train_frame, test_frame, epochs=args.epochs
+            )
+            train_count, test_count = len(train_frame), len(test_frame)
     except FileNotFoundError:
         print(f"Error: could not read database file: {args.db_path}", file=sys.stderr)
         return 1
@@ -90,12 +125,15 @@ def main(argv: list[str] | None = None) -> int:
 
     output_path = Path(args.output)
     try:
-        save_model(trained, output_path)
+        if isinstance(trained, TrainedSequenceModel):
+            save_sequence_model(trained, output_path)
+        else:
+            save_model(trained, output_path)
     except OSError as exc:
         print(f"Error: could not write model file: {output_path}: {exc}", file=sys.stderr)
         return 1
 
-    print(f"Trained on {len(train_frame)} rows, tested on {len(test_frame)} rows")
+    print(f"Trained on {train_count} rows, tested on {test_count} rows")
     print(
         f"Train accuracy: {metrics['train_accuracy']:.3f}  "
         f"Test accuracy: {metrics['test_accuracy']:.3f}"
