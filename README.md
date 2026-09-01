@@ -26,6 +26,10 @@ StockStreamDB            SmartAnalyticsInvest              SmartDirectionNet
  implemented)
 ```
 
+See [`INTEGRATION_STATUS.md`](INTEGRATION_STATUS.md) for what's currently verified to
+actually work end-to-end against real data, versus what's only unit-tested or still
+unimplemented upstream.
+
 ## Setup
 
 Use Python 3.14 or newer.
